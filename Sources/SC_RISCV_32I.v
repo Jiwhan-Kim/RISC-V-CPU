@@ -1,5 +1,13 @@
 `timescale 1ns / 1ps
 
+/*
+    SYS3104 - Computer Architecture Lab04
+    Five-Stage Pipelined RISC-V Architecture CPU
+    Kim Ji Whan
+    2021189004
+
+    Version - 1.0.1. on 23.06.23. 00:38
+*/
 module SC_RISCV_32I(
     input clk, rst, pc_en
 );
@@ -64,9 +72,11 @@ end
 // 02. Instruction Decode
 // Data
 wire [31:0] RD1, RD2;              // Register Data 1, 2
+wire [31:0] BrA, BrB;    // Data for Branching
 wire [31:0] Imm;                   // Immediate 
 
 // Control Signals
+wire        Forward_BrASel, Forward_BrBSel;
 wire        BrEq, BrLt;// Branch Output
 wire        PCSel; // pc_next to 1 : ALU_result / 0 : pc_4
 wire        RegWrite; // 1 : Read + Write on Register / 0 : Read Mode
@@ -78,8 +88,27 @@ wire        Sel; // 1 : Imm / 0 : rd2
 wire        MemRW; // 1 : Write Data on Memory / 0 : Read
 wire [3:0]  ALUSel; // ALU Select
 wire [1:0]  WBSel; // Write Back Select. 10, 11: Read_Data / 01: ALU_result / 00: pc_4
+wire        branch_indicator;
 wire        stall; // Stall Pipeline
 wire        branch; // Flush IF-ID Interstage Regiters
+
+
+// Forwarding Unit
+assign Forward_BrASel = (EX_MEM_RegWrite & (IF_ID_Instruction[19:15] == EX_MEM_RD) & EX_MEM_RD != 5'b0) ? 2'b10 : // Forward from MEM
+                        (MEM_WB_RegWrite & (IF_ID_Instruction[19:15] == MEM_WB_RD) & MEM_WB_RD != 5'b0) ? 2'b11 : // Forward from WB
+                                                                                                          2'b00 ; // RD1
+assign Forward_BrBSel = (EX_MEM_RegWrite & (IF_ID_Instruction[24:20] == EX_MEM_RD) & EX_MEM_RD != 5'b0) ? 2'b10 : // Forward from MEM
+                        (MEM_WB_RegWrite & (IF_ID_Instruction[24:20] == MEM_WB_RD) & MEM_WB_RD != 5'b0) ? 2'b11 : // Forward from WB
+                                                                                                          2'b00 ; // RD2
+
+// ASel, BSel
+assign BrA = Forward_BrASel == 2'b11 ? WB                :
+             Forward_BrASel == 2'b10 ? EX_MEM_ALU_result :
+                                       RD1               ;
+
+assign BrB = Forward_BrBSel == 2'b11 ? WB                :
+             Forward_BrBSel == 2'b10 ? EX_MEM_ALU_result :
+                                       RD2               ;
 
 // Read Data from Register File
 Register_File Reg_File(
@@ -97,16 +126,16 @@ Register_File Reg_File(
 
 // Immediate Generator
 Imm_Gen Imm_Gen (
-    .inst(IF_ID_Instruction[31:7]), // Input Instruction
-    .ImmSel(ImmSel), // Input Immediate Select
+    .inst   (IF_ID_Instruction[31:7]), // Input Instruction
+    .ImmSel (ImmSel),                  // Input Immediate Select
 
-    .Imm(Imm) // Output Immediate Value
+    .Imm    (Imm)                      // Output Immediate Value
 );
 
 // Branch Compare
 Branch_Comp Br_Comp (
-    .RD1(RD1),
-    .RD2(RD2),
+    .RD1(Branch_1),
+    .RD2(Branch_2),
     .BrU(BrU),
     .BrEq(BrEq),
     .BrLt(BrLt)
@@ -127,26 +156,35 @@ Main_Control Ctrl (
     .BSel(BSel),
     .MemRW(MemRW),
     .ALUSel(ALUSel),
-    .WBSel(WBSel)
+    .WBSel(WBSel),
+    .branch_indicator(branch_indicator)
 );
 
 // Hazard Detection Unit
 Hazard HazardDetect (
-    .IF_ID_RS1(IF_ID_Instruction[19:15]), // RS1
-    .IF_ID_RS2(IF_ID_Instruction[24:20]), // RS2
-    .ID_EX_RD(ID_EX_RD),
-    .DatasizeSel(DatasizeSel), // To Check Hazard when reading data
+    .IF_ID_RS1        (IF_ID_Instruction[19:15]), // RS1
+    .IF_ID_RS2        (IF_ID_Instruction[24:20]), // RS2
+    .ID_EX_RD         (ID_EX_RD),
+    .EX_MEM_RD        (EX_MEM_RD),
 
-    .stall(stall)
+    .ID_EX_RegWrite   (ID_EX_RegWrite),
+    .EX_MEM_RegWrite  (EX_MEM_RegWrite),
+    .ID_EX_WBSel      (ID_EX_WBSel),
+    .ID_EX_WBSel      (EX_MEM_WBSel),
+
+    .branch_indicator (branch_indicator),
+
+    .stall            (stall)
 );
 
 Branch_Control Br_Ctrl (
     .PCSel(PCSel),
     .Imm(Imm),
     .IF_ID_PC(IF_ID_PC),
+    .stall(stall),
 
-    .pc_branch(pc_branch), // Output PC_Branch Data
-    .branch(branch)        // Output Branch Control Signal
+    .branch(branch),        // Output Branch Control Signal
+    .pc_branch(pc_branch) // Output PC_Branch Data
 );
 
 
@@ -224,13 +262,24 @@ wire [31:0] ALU_result;                                    // ALU Result
 // Control Signal
 wire [1:0] Forward_ASel, Forward_BSel;
 
+// Forwarding Unit
+assign Forward_ASel = (!ID_EX_ASel)                                                    ? 2'b00 :
+                      (EX_MEM_RegWrite & (ID_EX_RS1 == EX_MEM_RD) & EX_MEM_RD != 5'b0) ? 2'b10 : // Forward from MEM
+                      (MEM_WB_RegWrite & (ID_EX_RS1 == MEM_WB_RD) & MEM_WB_RD != 5'b0) ? 2'b11 : // Forward from WB
+                      (ID_EX_ASel)                                                     ? 2'b01 : // RD1
+
+assign Forward_BSel = (ID_EX_BSel)                                                     ? 2'b01 : // Imm
+                      (EX_MEM_RegWrite & (ID_EX_RS2 == EX_MEM_RD) & EX_MEM_RD != 5'b0) ? 2'b10 : // Forward from MEM
+                      (MEM_WB_RegWrite & (ID_EX_RS2 == MEM_WB_RD) & MEM_WB_RD != 5'b0) ? 2'b11 : // Forward from WB
+                                                                                         2'b00 ; // RD2
+
 // ASel, BSel
-assign ALU_A = Forward_ASel == 2'b11 ? MEM_WB_ALU_result :
+assign ALU_A = Forward_ASel == 2'b11 ? WB                :
                Forward_ASel == 2'b10 ? EX_MEM_ALU_result :
                Forward_ASel == 2'b01 ? ID_EX_RD1         :
                                        ID_EX_PC          ;
 
-assign ALU_B = Forward_BSel == 2'b11 ? MEM_WB_ALU_result :
+assign ALU_B = Forward_BSel == 2'b11 ? WB                :
                Forward_BSel == 2'b10 ? EX_MEM_ALU_result :
                Forward_BSel == 2'b01 ? ID_EX_Imm         :
                                        ID_EX_RD2         ;
@@ -244,15 +293,7 @@ ALU ALU(
     .ALU_result(ALU_result) // Output ALU Result
 );
 
-// Forwarding Unit
-assign Forward_ASel = (EX_MEM_RegWrite & (ID_EX_RS1 == EX_MEM_RD) & EX_MEM_RD != 5'b0) ? 2'b10 : // Forward from MEM
-                      (MEM_WB_RegWrite & (ID_EX_RS1 == MEM_WB_RD) & MEM_WB_RD != 5'b0) ? 2'b11 : // Forward from WB
-                      (ID_EX_ASel)                                                     ? 2'b01 : // RD1
-                                                                                         2'b00 ; // PC
-assign Forward_BSel = (EX_MEM_RegWrite & (ID_EX_RS2 == EX_MEM_RD) & EX_MEM_RD != 5'b0) ? 2'b10 : // Forward from MEM
-                      (MEM_WB_RegWrite & (ID_EX_RS2 == MEM_WB_RD) & MEM_WB_RD != 5'b0) ? 2'b11 : // Forward from WB
-                      (ID_EX_BSel)                                                     ? 2'b01 : // Imm
-                                                                                         2'b00 ; // RD2
+
 
 // EX-MEM Interstage
 // Data

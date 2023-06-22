@@ -6,7 +6,8 @@ module Main_Control(
     output reg [2:0] DatasizeSel,
     output reg ASel, BSel, MemRW, 
     output reg [3:0] ALUSel,
-    output reg [1:0] WBSel
+    output reg [1:0] WBSel,
+    output reg       branch_indicator
 );
 
 always@(*) begin
@@ -28,6 +29,7 @@ always@(*) begin
                 ImmSel <= 3'b100;
                 ASel <= 1'b0; // PC
                 BSel <= 1'b1; // imm
+                branch_indicator <= 1'b0;
             end else if (instruction[2] == 1'b1) begin
                 // I (jalr)
                 PCSel <= 1'b1; // PC = PC + imm
@@ -36,6 +38,7 @@ always@(*) begin
                 ImmSel <= 3'b000;
                 ASel <= 1'b1; // rs1
                 BSel <= 1'b1; // imm
+                branch_indicator <= 1'b0;
             end else if (instruction[2] == 1'b0) begin
                 // SB Type Instructions
                 RegWrite <= 1'b0; // No Need to write on Register
@@ -57,6 +60,7 @@ always@(*) begin
                         PCSel <= !BrLt;
                     end
                 endcase
+                branch_indicator <= 1'b1;
             end else ;
         end
         1'b0: begin // I(load), S, I(immediate), R Type Instructions
@@ -67,6 +71,7 @@ always@(*) begin
             PCSel <= 1'b0; // PC = PC + 4
             BrU <= 1'b0; // No Needed
             ASel <= 1'b1; // rs1
+            branch_indicator <= 1'b0;
             case (instruction[4])
                 1'b0: begin // I(load), S Type Instructions
                     // instruction[5] I(load): 1'b0 / S: 1'b1
