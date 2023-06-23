@@ -6,7 +6,7 @@
     Kim Ji Whan
     2021189004
 
-    Version - 1.0.1. on 23.06.23. 14:58
+    Version - 1.0.3. on 23.06.23. 17:31
 */
 module SC_RISCV_32I(
     input clk, rst, pc_en
@@ -19,7 +19,7 @@ wire [7:0]  pc_next;
 wire [7:0]  pc_branch;
 
 assign pc_4    = stall ? (PC) : (PC + 8'h4);
-assign pc_next = (!stall & branch) ? pc_branch : pc_4;
+assign pc_next = branch ? pc_branch : pc_4;
 
 always @(posedge clk) begin
     if (rst) begin
@@ -62,14 +62,18 @@ always @(posedge clk or posedge rst) begin
         IF_ID_PC[7:0]           <= 8'b0;
     end
     else begin
-        if (branch) begin
+        if (stall) begin
+            IF_ID_Instruction[31:0] <= IF_ID_Instruction[31:0];
+            IF_ID_PC[7:0]           <= IF_ID_PC[7:0];
+        end
+        else if (branch) begin
             // Flush Old Data
             IF_ID_Instruction[31:0] <= 32'b0;
             IF_ID_PC[7:0]           <= 8'b0;
         end
         else begin
             IF_ID_Instruction[31:0] <= Instruction[31:0];
-            IF_ID_PC[7:0]           <= PC;
+            IF_ID_PC[7:0]           <= PC[7:0];
         end
     end
 end
@@ -177,7 +181,7 @@ Hazard HazardDetect (
     .ID_EX_RegWrite   (ID_EX_RegWrite),
     .EX_MEM_RegWrite  (EX_MEM_RegWrite),
     .ID_EX_WBSel      (ID_EX_WBSel),
-    .ID_EX_WBSel      (EX_MEM_WBSel),
+    .EX_MEM_WBSel     (EX_MEM_WBSel),
 
     .branch_indicator (branch_indicator),
 
@@ -304,6 +308,7 @@ ALU ALU(
 
 // EX-MEM Interstage
 // Data
+reg [4:0]   EX_MEM_RS2;
 reg [4:0]   EX_MEM_RD;
 reg [31:0]  EX_MEM_RD2;
 reg [31:0]  EX_MEM_ALU_result;
@@ -317,6 +322,7 @@ reg [1:0]   EX_MEM_WBSel; // Write Back Select. 10, 11: Read_Data / 01: ALU_resu
 
 always @(posedge clk or posedge rst) begin
     if (rst) begin
+        EX_MEM_RS2[4:0]         <= 5'b0;
         EX_MEM_RD[4:0]          <= 5'b0;
         EX_MEM_RD2[31:0]        <= 32'b0;
         EX_MEM_ALU_result[31:0] <= 32'b0;
@@ -328,8 +334,14 @@ always @(posedge clk or posedge rst) begin
         EX_MEM_WBSel[1:0]       <= 2'b0;
     end
     else begin
+        EX_MEM_RS2[4:0]         <= ID_EX_RS2;
         EX_MEM_RD[4:0]          <= ID_EX_RD;
-        EX_MEM_RD2[31:0]        <= ID_EX_RD2;
+        if (MEM_WB_RegWrite && ID_EX_RS2 == MEM_WB_RD && MEM_WB_RD != 5'b0) begin
+            EX_MEM_RD2[31:0]    <= WB;
+        end
+        else begin
+            EX_MEM_RD2[31:0]    <= ID_EX_RD2;
+        end
         EX_MEM_ALU_result[31:0] <= ALU_result;
         EX_MEM_PC[4:0]          <= ID_EX_PC;
 
@@ -343,14 +355,17 @@ end
 
 // 04. Read Data from Data Cache
 // Data
+wire [31:0] Write_Data;
 wire [31:0] Read_Data;             // Read Data from Data Memory
 
 // Control
+assign Write_Data = (MEM_WB_RegWrite && EX_MEM_RS2 == MEM_WB_RD && MEM_WB_RD != 5'b0) ? WB : EX_MEM_RD2;
+
 
 Data_Mem Data_Mem(
     .clk(clk),
     .Address(EX_MEM_ALU_result),
-    .WriteData(EX_MEM_RD2),
+    .WriteData(Write_Data),
     .DatasizeSel(EX_MEM_DatasizeSel),
     .MemRW(EX_MEM_MemRW),
 
@@ -387,7 +402,6 @@ always @(posedge clk or posedge rst) begin
         MEM_WB_RegWrite         <= EX_MEM_RegWrite;
         MEM_WB_WBSel[1:0]       <= EX_MEM_WBSel;
     end
-
 end
 
 

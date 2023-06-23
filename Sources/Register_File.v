@@ -1,5 +1,5 @@
 module Register_File(
-    input RegWrite, clk, rst,
+    input RegWrite, rst,
     input [4:0] Read_Reg1, Read_Reg2, Write_Reg,
     input [31:0] Write_Data,
     output [31:0] Read_Data1, Read_Data2
@@ -7,7 +7,7 @@ module Register_File(
 
 reg [31:0] Register_file [0:31];
 integer i;
-always @ (posedge clk or posedge rst) begin
+always @ (posedge RegWrite or posedge rst or Write_Data) begin
     if (rst) begin
         for (i = 0; i < 32; i = i + 1) begin
             Register_file[i] <= {32{1'b0}};
