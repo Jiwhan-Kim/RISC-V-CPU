@@ -6,7 +6,7 @@
     Kim Ji Whan
     2021189004
 
-    Version - 1.0.3. on 23.06.23. 17:31
+    Version - 1.0.4. on 23.06.23. 21:09
 */
 module SC_RISCV_32I(
     input clk, rst, pc_en
@@ -87,7 +87,7 @@ wire [31:0] BrA, BrB;    // Data for Branching
 wire [31:0] Imm;                   // Immediate 
 
 // Control Signals
-wire        Forward_BrASel, Forward_BrBSel;
+wire [1:0]  Forward_BrASel, Forward_BrBSel;
 wire        BrEq, BrLt;// Branch Output
 wire        PCSel; // pc_next to 1 : ALU_result / 0 : pc_4
 wire        RegWrite; // 1 : Read + Write on Register / 0 : Read Mode
@@ -105,21 +105,21 @@ wire        branch; // Flush IF-ID Interstage Regiters
 
 
 // Forwarding Unit
-assign Forward_BrASel = (EX_MEM_RegWrite & (IF_ID_Instruction[19:15] == EX_MEM_RD) & EX_MEM_RD != 5'b0) ? 2'b10 : // Forward from MEM
-                        (MEM_WB_RegWrite & (IF_ID_Instruction[19:15] == MEM_WB_RD) & MEM_WB_RD != 5'b0) ? 2'b11 : // Forward from WB
-                                                                                                          2'b00 ; // RD1
-assign Forward_BrBSel = (EX_MEM_RegWrite & (IF_ID_Instruction[24:20] == EX_MEM_RD) & EX_MEM_RD != 5'b0) ? 2'b10 : // Forward from MEM
-                        (MEM_WB_RegWrite & (IF_ID_Instruction[24:20] == MEM_WB_RD) & MEM_WB_RD != 5'b0) ? 2'b11 : // Forward from WB
-                                                                                                          2'b00 ; // RD2
+assign Forward_BrASel = (EX_MEM_RegWrite & (IF_ID_Instruction[19:15] == EX_MEM_RD) & (EX_MEM_RD != 5'b0)) ? 2'b10 : // Forward from MEM
+                        (MEM_WB_RegWrite & (IF_ID_Instruction[19:15] == MEM_WB_RD) & (MEM_WB_RD != 5'b0)) ? 2'b11 : // Forward from WB
+                                                                                                            2'b00 ; // RD1
+assign Forward_BrBSel = (EX_MEM_RegWrite & (IF_ID_Instruction[24:20] == EX_MEM_RD) & (EX_MEM_RD != 5'b0)) ? 2'b10 : // Forward from MEM
+                        (MEM_WB_RegWrite & (IF_ID_Instruction[24:20] == MEM_WB_RD) & (MEM_WB_RD != 5'b0)) ? 2'b11 : // Forward from WB
+                                                                                                            2'b00 ; // RD2
 
 // ASel, BSel
-assign BrA = Forward_BrASel == 2'b11 ? WB                :
-             Forward_BrASel == 2'b10 ? EX_MEM_ALU_result :
-                                       RD1               ;
+assign BrA = (Forward_BrASel == 2'b11) ? WB                :
+             (Forward_BrASel == 2'b10) ? EX_MEM_ALU_result :
+                                         RD1               ;
 
-assign BrB = Forward_BrBSel == 2'b11 ? WB                :
-             Forward_BrBSel == 2'b10 ? EX_MEM_ALU_result :
-                                       RD2               ;
+assign BrB = (Forward_BrBSel == 2'b11) ? WB                :
+             (Forward_BrBSel == 2'b10) ? EX_MEM_ALU_result :
+                                         RD2               ;
 
 // Read Data from Register File
 Register_File Reg_File(
@@ -237,8 +237,18 @@ always @(posedge clk or posedge rst) begin
         ID_EX_RS1[4:0]  <= IF_ID_Instruction[19:15];
         ID_EX_RS2[4:0]  <= IF_ID_Instruction[24:20];
         ID_EX_RD [4:0]  <= IF_ID_Instruction[11:7];
-        ID_EX_RD1[31:0] <= RD1[31:0];
-        ID_EX_RD2[31:0] <= RD2[31:0];
+        if (MEM_WB_RegWrite && IF_ID_Instruction[19:15] == MEM_WB_RD && MEM_WB_RD != 5'b0) begin
+            ID_EX_RD1[31:0]    <= WB;
+        end
+        else begin
+            ID_EX_RD1[31:0]    <= RD1;
+        end
+        if (MEM_WB_RegWrite && IF_ID_Instruction[24:20] == MEM_WB_RD && MEM_WB_RD != 5'b0) begin
+            ID_EX_RD2[31:0]    <= WB;
+        end
+        else begin
+            ID_EX_RD2[31:0]    <= RD2;
+        end
         ID_EX_Imm[31:0] <= Imm[31:0];
         ID_EX_PC[7:0]   <= IF_ID_PC[7:0];
 
@@ -277,7 +287,7 @@ wire [1:0] Forward_ASel, Forward_BSel;
 assign Forward_ASel = (!ID_EX_ASel)                                                    ? 2'b00 :
                       (EX_MEM_RegWrite & (ID_EX_RS1 == EX_MEM_RD) & EX_MEM_RD != 5'b0) ? 2'b10 : // Forward from MEM
                       (MEM_WB_RegWrite & (ID_EX_RS1 == MEM_WB_RD) & MEM_WB_RD != 5'b0) ? 2'b11 : // Forward from WB
-                      (ID_EX_ASel)                                                     ? 2'b01 : // RD1
+                                                                                         2'b01 ; // RD1
 
 assign Forward_BSel = (ID_EX_BSel)                                                     ? 2'b01 : // Imm
                       (EX_MEM_RegWrite & (ID_EX_RS2 == EX_MEM_RD) & EX_MEM_RD != 5'b0) ? 2'b10 : // Forward from MEM
@@ -380,8 +390,8 @@ reg [31:0] MEM_WB_ALU_result;
 reg [4:0]  MEM_WB_PC;
 
 // Control
-reg         MEM_WB_RegWrite; // 1 : Read + Write on Register / 0 : Read Mode
-reg [1:0]   MEM_WB_WBSel; // Write Back Select. 10, 11: Read_Data / 01: ALU_result / 00: pc_4
+reg        MEM_WB_RegWrite; // 1 : Read + Write on Register / 0 : Read Mode
+reg [1:0]  MEM_WB_WBSel;    // Write Back Select. 10, 11: Read_Data / 01: ALU_result / 00: pc_4
 
 always @(posedge clk or posedge rst) begin
     if (rst) begin
