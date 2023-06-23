@@ -9,6 +9,6 @@ module Branch_Control(
 );
     
 assign branch = stall ? 1'b0 : PCSel;
-assign newPC  = stall ? 8'b0 : IF_ID_PC + Imm;
+assign pc_branch  = stall ? 8'b0 : IF_ID_PC + Imm;
 
 endmodule

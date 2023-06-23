@@ -6,7 +6,7 @@
     Kim Ji Whan
     2021189004
 
-    Version - 1.0.1. on 23.06.23. 00:38
+    Version - 1.0.1. on 23.06.23. 14:58
 */
 module SC_RISCV_32I(
     input clk, rst, pc_en
@@ -62,8 +62,15 @@ always @(posedge clk or posedge rst) begin
         IF_ID_PC[7:0]           <= 8'b0;
     end
     else begin
-        IF_ID_Instruction[31:0] <= Instruction[31:0];
-        IF_ID_PC[7:0]           <= PC;
+        if (branch) begin
+            // Flush Old Data
+            IF_ID_Instruction[31:0] <= 32'b0;
+            IF_ID_PC[7:0]           <= 8'b0;
+        end
+        else begin
+            IF_ID_Instruction[31:0] <= Instruction[31:0];
+            IF_ID_PC[7:0]           <= PC;
+        end
     end
 end
 
@@ -134,8 +141,8 @@ Imm_Gen Imm_Gen (
 
 // Branch Compare
 Branch_Comp Br_Comp (
-    .RD1(Branch_1),
-    .RD2(Branch_2),
+    .RD1(BrA),
+    .RD2(BrB),
     .BrU(BrU),
     .BrEq(BrEq),
     .BrLt(BrLt)
