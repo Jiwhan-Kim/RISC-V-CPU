@@ -6,42 +6,33 @@
     Kim Ji Whan
     2021189004
 
-    Version - 2.0.1. on 23.06.25. 16:33
+    Version - 2.0.3. on 23.06.25. 21:00
 */
 module SC_RISCV_32I(
     input clk, rst, pc_en
 );
 
 // PC
-wire [7:0] PC;
-reg  [7:0] ID_PC;
+reg  [7:0] PC;
 wire [7:0] pc_4;
 wire [7:0] pc_next;
 wire [7:0] pc_branch;
+wire [7:0] pc_predicted;
+wire       taken; // Whether Branch was taken on PC last time.
 
-assign PC      = branch_indicator ? pc_branch : ID_PC;
 assign pc_4    = PC + 8'h4;
-assign pc_next = stall ? PC : pc_4;
+assign pc_next = stall        ? PC
+               : branch_wrong ? pc_branch 
+               : taken        ? pc_predicted
+                              : pc_4;
 
 always @(posedge clk) begin
     if (rst) begin
-        ID_PC <= 0;
+        PC <= 0;
     end
     else if (pc_en) begin
-        ID_PC <= pc_next;
+        PC <= pc_next;
     end
-end
-
-// Finish Testbench
-always @(posedge clk) begin
-    if (pc_next == 8'b0) begin
-        #10
-        $finish;
-    end
-end
-
-always @(posedge clk) begin
-    if (pc_en && (pc_next === 8'hxx || pc_next === 8'hzz)) $finish;
 end
 
 // 01. Instruction Fetch
@@ -52,6 +43,22 @@ Inst_Mem Inst_Mem(
     .PC             (PC), // Input PC (Program Counter)
 
     .instruction    (Instruction) // Output Instruction
+);
+
+Predictor BTB( // Branch Target Buffer
+    .clk (clk),
+    .rst (rst),
+
+    .stall  (stall),
+    .branch_indicator (branch_indicator),
+    .branch (branch),
+    .pc_branch (pc_branch),
+
+    .PC (PC),
+    .IF_ID_PC (IF_ID_PC),
+
+    .taken (taken),
+    .pc_predicted (pc_predicted)
 );
 
 // IF-ID Interstage
@@ -68,7 +75,7 @@ always @(posedge clk or posedge rst) begin
             IF_ID_Instruction[31:0] <= IF_ID_Instruction[31:0];
             IF_ID_PC[7:0]           <= IF_ID_PC[7:0];
         end
-        else if (branch) begin
+        else if (branch_wrong) begin
             // Flush Old Data
             IF_ID_Instruction[31:0] <= 32'b0;
             IF_ID_PC[7:0]           <= 8'b0;
@@ -84,9 +91,9 @@ end
 
 // 02. Instruction Decode
 // Data
-wire [31:0] RD1, RD2;              // Register Data 1, 2
+wire [31:0] RD1, RD2;    // Register Data 1, 2
 wire [31:0] BrA, BrB;    // Data for Branching
-wire [31:0] Imm;                   // Immediate 
+wire [31:0] Imm;         // Immediate 
 
 // Control Signals
 wire [1:0]  Forward_BrASel, Forward_BrBSel;
@@ -104,7 +111,7 @@ wire [1:0]  WBSel; // Write Back Select. 10, 11: Read_Data / 01: ALU_result / 00
 wire        branch_indicator;
 wire        stall; // Stall Pipeline
 wire        branch; // Flush IF-ID Interstage Regiters
-
+wire        branch_wrong;
 
 // Forwarding Unit
 assign Forward_BrASel = (EX_MEM_RegWrite & (IF_ID_Instruction[19:15] == EX_MEM_RD) & (EX_MEM_RD != 5'b0)) ? 2'b10 : // Forward from MEM
@@ -193,11 +200,14 @@ Hazard HazardDetect (
 Branch_Control Br_Ctrl (
     // Static Prediction - Always Branch
     .PCSel(PCSel),
-    .Imm(Imm),
-    .IF_ID_PC(IF_ID_PC),
-    .branch_indicator (branch_indicator),
     .stall(stall),
+    .branch_indicator (branch_indicator),
 
+    .Imm(Imm),
+    .PC (PC),
+    .IF_ID_PC(IF_ID_PC),
+    
+    .branch_wrong (branch_wrong),
     .branch(branch),      // Output Branch Control Signal
     .pc_branch(pc_branch) // Output PC_Branch Data
 );
@@ -357,7 +367,7 @@ always @(posedge clk or posedge rst) begin
             EX_MEM_RD2[31:0]    <= ID_EX_RD2;
         end
         EX_MEM_ALU_result[31:0] <= ALU_result;
-        EX_MEM_PC[4:0]          <= ID_EX_PC;
+        EX_MEM_PC[7:0]          <= ID_EX_PC;
 
         EX_MEM_RegWrite         <= ID_EX_RegWrite;
         EX_MEM_DatasizeSel[2:0] <= ID_EX_DatasizeSel;
@@ -423,5 +433,13 @@ end
 // Data
 wire [31:0] WB;      
 assign WB = (MEM_WB_WBSel[1] == 1'b1) ? MEM_WB_Read_Data : (MEM_WB_WBSel[0] == 1'b1) ? MEM_WB_ALU_result : MEM_WB_PC;
+
+// To Finish Simulation
+always @(posedge clk) begin
+    if (MEM_WB_PC == 8'h84) begin
+        #10
+        $finish;
+    end
+end
 
 endmodule
