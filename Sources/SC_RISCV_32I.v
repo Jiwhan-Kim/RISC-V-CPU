@@ -13,10 +13,10 @@ module SC_RISCV_32I(
 );
 
 // PC
-reg  [7:0]  PC;
-wire [7:0]  pc_4;
-wire [7:0]  pc_next;
-wire [7:0]  pc_branch;
+reg  [7:0] PC;
+wire [7:0] pc_4;
+wire [7:0] pc_next;
+wire [7:0] pc_branch;
 
 assign pc_4    = stall ? (PC) : (PC + 8'h4);
 assign pc_next = branch ? pc_branch : pc_4;
@@ -189,12 +189,13 @@ Hazard HazardDetect (
 );
 
 Branch_Control Br_Ctrl (
+    // Static Prediction - Always Branch
     .PCSel(PCSel),
     .Imm(Imm),
     .IF_ID_PC(IF_ID_PC),
     .stall(stall),
 
-    .branch(branch),        // Output Branch Control Signal
+    .branch(branch),      // Output Branch Control Signal
     .pc_branch(pc_branch) // Output PC_Branch Data
 );
 
