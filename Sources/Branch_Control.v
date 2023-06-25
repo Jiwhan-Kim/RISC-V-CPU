@@ -3,6 +3,7 @@ module Branch_Control(
     input wire  [31:0] Imm,
     input wire  [7:0]  IF_ID_PC,
     input wire         stall,
+    input wire         branch_indicator,
 
     output wire        branch,
     output wire [7:0]  pc_branch

@@ -6,27 +6,29 @@
     Kim Ji Whan
     2021189004
 
-    Version - 1.0.4. on 23.06.23. 21:09
+    Version - 2.0.1. on 23.06.25. 16:33
 */
 module SC_RISCV_32I(
     input clk, rst, pc_en
 );
 
 // PC
-reg  [7:0] PC;
+wire [7:0] PC;
+reg  [7:0] ID_PC;
 wire [7:0] pc_4;
 wire [7:0] pc_next;
 wire [7:0] pc_branch;
 
-assign pc_4    = stall ? (PC) : (PC + 8'h4);
-assign pc_next = branch ? pc_branch : pc_4;
+assign PC      = branch_indicator ? pc_branch : ID_PC;
+assign pc_4    = PC + 8'h4;
+assign pc_next = stall ? PC : pc_4;
 
 always @(posedge clk) begin
     if (rst) begin
-        PC <= 0;
+        ID_PC <= 0;
     end
     else if (pc_en) begin
-        PC <= pc_next;
+        ID_PC <= pc_next;
     end
 end
 
@@ -193,6 +195,7 @@ Branch_Control Br_Ctrl (
     .PCSel(PCSel),
     .Imm(Imm),
     .IF_ID_PC(IF_ID_PC),
+    .branch_indicator (branch_indicator),
     .stall(stall),
 
     .branch(branch),      // Output Branch Control Signal
